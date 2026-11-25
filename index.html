@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Newton-Raphson Equation Solver</title>
+<style>
+*{box-sizing:border-box}
+html,body{overflow-x:hidden}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f1f5f9;color:#0f172a}
+main{max-width:960px;margin:0 auto;padding:24px 16px 48px}
+h1{margin:0 0 4px;font-size:1.8rem}
+h2{margin:0 0 12px;font-size:1.2rem}
+.sub{margin:0 0 20px;color:#475569}
+.card{background:#fff;border-radius:12px;padding:18px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.row{margin-bottom:12px}
+.row.inline{display:flex;gap:16px;flex-wrap:wrap}
+label{display:flex;align-items:center;gap:8px;font-weight:600}
+#eq{flex:1;min-width:0;width:100%;font-size:1.1rem}
+input{padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:1rem;font-family:ui-monospace,Consolas,monospace}
+input[type=number]{width:130px;max-width:100%}
+@media(max-width:600px){h1{font-size:1.4rem}.examples{display:block;margin:8px 0 0}.row.inline label{width:100%;justify-content:space-between}button{width:100%}th,td{padding:5px 6px;font-size:.8rem}}
+.row>label{width:100%}
+button{background:#2563eb;color:#fff;border:0;border-radius:8px;padding:10px 28px;font-size:1.05rem;font-weight:700;cursor:pointer}
+button:hover{background:#1d4ed8}
+.examples{margin-left:12px;font-size:.9rem;color:#475569}
+.examples a{margin-left:8px;color:#2563eb}
+.hint{color:#64748b;font-size:.85rem;margin:8px 0 0}
+.error{background:#fee2e2;color:#991b1b;border-radius:8px;padding:12px;margin-bottom:16px}
+.big{font-size:1.4rem;font-weight:700;margin:0 0 8px}
+.ok{color:#15803d}.warn{color:#b45309}
+code{background:#f1f5f9;padding:2px 6px;border-radius:4px}
+canvas{width:100%;height:auto;border:1px solid #e2e8f0;border-radius:8px}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-family:ui-monospace,Consolas,monospace;font-size:.92rem}
+th,td{border:1px solid #e2e8f0;padding:6px 10px;text-align:right}
+th{background:#f1f5f9}
+tr:last-child td{background:#ecfdf5}
+
+</style>
+</head>
+<body>
+<main>
+  <h1>Newton-Raphson Equation Solver</h1>
+  <p class="sub">Solve f(x) = 0 using x<sub>i+1</sub> = x<sub>i</sub> &minus; f(x<sub>i</sub>) / f&prime;(x<sub>i</sub>)</p>
+
+  <section class="card">
+    <div class="row">
+      <label>f(x) =
+        <input id="eq" type="text" value="x^3 - 8x + 5" spellcheck="false" autocomplete="off">
+      </label>
+    </div>
+    <div class="row inline">
+      <label>Start x<sub>0</sub> <input id="x0" type="number" step="any" value="0"></label>
+      <label>Tolerance <input id="tol" type="number" step="any" value="0.0001"></label>
+      <label>Max iterations <input id="maxit" type="number" value="50" min="1" max="500"></label>
+    </div>
+    <div class="row">
+      <button id="solve">Solve</button>
+      <span class="examples">Examples:
+        <a href="#" data-eq="x^3 - 8x + 5" data-x0="0">x³−8x+5</a>
+        <a href="#" data-eq="x^4 - 11x + 8" data-x0="2">x⁴−11x+8</a>
+        <a href="#" data-eq="exp(-x) - x" data-x0="0">e^−x − x</a>
+        <a href="#" data-eq="x^3 - 2x^2 + 0.25x + 0.75" data-x0="-1">x³−2x²+0.25x+0.75</a>
+      </span>
+    </div>
+    <p class="hint">Use x as the variable. Supported: + − * / ^ ( ), sin, cos, tan, exp, ln, log (base 10), sqrt, abs, pi, e. Example: 2x^2 - 3*sin(x) - 5</p>
+  </section>
+
+  <div id="error" class="error" hidden></div>
+
+  <section id="results" hidden>
+    <div class="card">
+      <h2>Result</h2>
+      <p id="rootLine" class="big"></p>
+      <p id="status"></p>
+      <p><b>f&prime;(x)</b> = <code id="d1"></code></p>
+      <p><b>f&Prime;(x)</b> = <code id="d2"></code></p>
+      <p id="conv"></p>
+    </div>
+    <div class="card">
+      <h2>Graph of f(x)</h2>
+      <canvas id="plot" width="900" height="460"></canvas>
+      <p class="hint">Blue: f(x). Orange dots: Newton iterates on the curve. Red dot: approximate root.</p>
+    </div>
+    <div class="card">
+      <h2>Iterations</h2>
+      <div class="tablewrap">
+        <table id="table">
+          <thead><tr><th>i</th><th>x<sub>i</sub></th><th>f(x<sub>i</sub>)</th><th>f&prime;(x<sub>i</sub>)</th><th>|x<sub>i+1</sub> &minus; x<sub>i</sub>|</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+"use strict";
+/* ---------- Tokenizer + parser (builds an expression tree) ---------- */
+const FUNCS = ["sin","cos","tan","exp","ln","log","sqrt","abs"];
+
+function tokenize(src) {
+  const s = src.replace(/\s+/g, "").replace(/−/g, "-").replace(/×/g, "*").replace(/²/g,"^2").replace(/³/g,"^3");
+  const out = [];
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (/[0-9.]/.test(c)) {
+      let j = i;
+      while (j < s.length && /[0-9.]/.test(s[j])) j++;
+      if (j < s.length && /[eE]/.test(s[j]) && /[0-9+-]/.test(s[j+1] || "") && /[0-9]/.test((s[j+1]==="+"||s[j+1]==="-") ? (s[j+2]||"") : (s[j+1]||""))) {
+        j++; if (s[j]==="+"||s[j]==="-") j++;
+        while (j < s.length && /[0-9]/.test(s[j])) j++;
+      }
+      const v = Number(s.slice(i, j));
+      if (!isFinite(v)) throw new Error("Bad number: " + s.slice(i, j));
+      out.push({t:"num", v}); i = j;
+    } else if (/[a-zA-Z]/.test(c)) {
+      let j = i;
+      while (j < s.length && /[a-zA-Z]/.test(s[j])) j++;
+      let word = s.slice(i, j).toLowerCase();
+      // split things like "xsin" or "2xx" greedily into known names
+      while (word.length) {
+        if (word === "pi" || word.startsWith("pi") && !FUNCS.some(f=>word.startsWith(f))) { out.push({t:"num", v:Math.PI, name:"pi"}); word = word.slice(2); continue; }
+        const f = FUNCS.find(f => word.startsWith(f));
+        if (f) { out.push({t:"fn", v:f}); word = word.slice(f.length); continue; }
+        if (word[0] === "x") { out.push({t:"var"}); word = word.slice(1); continue; }
+        if (word[0] === "e") { out.push({t:"num", v:Math.E, name:"e"}); word = word.slice(1); continue; }
+        throw new Error("Unknown name: " + word);
+      }
+      i = j;
+    } else if ("+-*/^(),".includes(c)) { out.push({t:c}); i++; }
+    else throw new Error("Unexpected character: " + c);
+  }
+  return out;
+}
+
+function parse(src) {
+  const toks = tokenize(src);
+  let p = 0;
+  const peek = () => toks[p] ? toks[p].t : null;
+  const eat = (t) => { if (peek() !== t) throw new Error("Expected '" + t + "'"); return toks[p++]; };
+  function expr() {
+    let n = term();
+    while (peek() === "+" || peek() === "-") {
+      const op = toks[p++].t; const r = term();
+      n = {k: op === "+" ? "add" : "sub", a: n, b: r};
+    }
+    return n;
+  }
+  function startsPrimary() { const t = peek(); return t === "num" || t === "var" || t === "fn" || t === "("; }
+  function term() {
+    let n = unary();
+    for (;;) {
+      if (peek() === "*" || peek() === "/") {
+        const op = toks[p++].t; const r = unary();
+        n = {k: op === "*" ? "mul" : "div", a: n, b: r};
+      } else if (startsPrimary()) { // implicit multiplication: 8x, 2(x+1)
+        n = {k:"mul", a:n, b: unary()};
+      } else break;
+    }
+    return n;
+  }
+  function unary() {
+    if (peek() === "-") { p++; return {k:"neg", a: unary()}; }
+    if (peek() === "+") { p++; return unary(); }
+    return power();
+  }
+  function power() {
+    const base = primary();
+    if (peek() === "^") { p++; const e = unary(); return {k:"pow", a: base, b: e}; }
+    return base;
+  }
+  function primary() {
+    const t = peek();
+    if (t === "num") { const tk = toks[p++]; return tk.name ? {k:"num", v: tk.v, name: tk.name} : {k:"num", v: tk.v}; }
+    if (t === "var") { p++; return {k:"var"}; }
+    if (t === "fn") {
+      const f = toks[p++].v;
+      let arg;
+      if (peek() === "(") { p++; arg = expr(); eat(")"); } else arg = power();
+      return {k:"fn", f, a: arg};
+    }
+    if (t === "(") { p++; const n = expr(); eat(")"); return n; }
+    throw new Error("Unexpected end or symbol in equation");
+  }
+  const tree = expr();
+  if (p < toks.length) throw new Error("Unexpected '" + toks[p].t + "'");
+  return tree;
+}
+
+/* ---------- Evaluate ---------- */
+function ev(n, x) {
+  switch (n.k) {
+    case "num": return n.v;
+    case "var": return x;
+    case "neg": return -ev(n.a, x);
+    case "add": return ev(n.a, x) + ev(n.b, x);
+    case "sub": return ev(n.a, x) - ev(n.b, x);
+    case "mul": return ev(n.a, x) * ev(n.b, x);
+    case "div": return ev(n.a, x) / ev(n.b, x);
+    case "pow": {
+      const b = ev(n.a, x), e = ev(n.b, x);
+      return Math.pow(b, e);
+    }
+    case "fn": {
+      const v = ev(n.a, x);
+      switch (n.f) {
+        case "sin": return Math.sin(v); case "cos": return Math.cos(v); case "tan": return Math.tan(v);
+        case "exp": return Math.exp(v); case "ln": return Math.log(v); case "log": return Math.log10(v);
+        case "sqrt": return Math.sqrt(v); case "abs": return Math.abs(v);
+      }
+    }
+  }
+  return NaN;
+}
+
+/* ---------- Symbolic derivative with light simplification ---------- */
+const N = v => ({k:"num", v});
+const isNum = (n, v) => n.k === "num" && (v === undefined || n.v === v);
+function add(a, b) { if (isNum(a,0)) return b; if (isNum(b,0)) return a; if (isNum(a)&&isNum(b)) return N(a.v+b.v); return {k:"add",a,b}; }
+function sub(a, b) { if (isNum(b,0)) return a; if (isNum(a,0)) return neg(b); if (isNum(a)&&isNum(b)) return N(a.v-b.v); return {k:"sub",a,b}; }
+function neg(a) { if (isNum(a)) return N(-a.v); if (a.k==="neg") return a.a; return {k:"neg",a}; }
+function mul(a, b) { if (isNum(a,0)||isNum(b,0)) return N(0); if (isNum(a,1)) return b; if (isNum(b,1)) return a; if (isNum(a)&&isNum(b)) return N(a.v*b.v); return {k:"mul",a,b}; }
+function div(a, b) { if (isNum(a,0)) return N(0); if (isNum(b,1)) return a; return {k:"div",a,b}; }
+function pow(a, b) { if (isNum(b,0)) return N(1); if (isNum(b,1)) return a; return {k:"pow",a,b}; }
+function hasVar(n) { return n.k === "var" || (n.a && hasVar(n.a)) || (n.b && hasVar(n.b)); }
+
+function d(n) {
+  switch (n.k) {
+    case "num": return N(0);
+    case "var": return N(1);
+    case "neg": return neg(d(n.a));
+    case "add": return add(d(n.a), d(n.b));
+    case "sub": return sub(d(n.a), d(n.b));
+    case "mul": return add(mul(d(n.a), n.b), mul(n.a, d(n.b)));
+    case "div": return div(sub(mul(d(n.a), n.b), mul(n.a, d(n.b))), pow(n.b, N(2)));
+    case "pow":
+      if (!hasVar(n.b)) return mul(mul(n.b, pow(n.a, isNum(n.b) ? N(n.b.v-1) : sub(n.b, N(1)))), d(n.a));
+      // general: (a^b)' = a^b * (b' ln a + b a'/a)
+      const lnA = (n.a.k === "num" && n.a.name === "e") ? N(1) : {k:"fn",f:"ln",a:n.a};
+      return mul(n, add(mul(d(n.b), lnA), div(mul(n.b, d(n.a)), n.a)));
+    case "fn": {
+      const u = n.a, du = d(u);
+      let outer;
+      switch (n.f) {
+        case "sin": outer = {k:"fn",f:"cos",a:u}; break;
+        case "cos": outer = neg({k:"fn",f:"sin",a:u}); break;
+        case "tan": outer = div(N(1), pow({k:"fn",f:"cos",a:u}, N(2))); break;
+        case "exp": outer = n; break;
+        case "ln": outer = div(N(1), u); break;
+        case "log": outer = div(N(1), mul(u, N(Math.LN10))); break;
+        case "sqrt": outer = div(N(1), mul(N(2), n)); break;
+        case "abs": outer = div(u, n); break;
+      }
+      return mul(outer, du);
+    }
+  }
+}
+
+/* ---------- Printing ---------- */
+const PREC = {add:1, sub:1, mul:2, div:2, neg:3, pow:4};
+function fmtNum(v) { return Number.isInteger(v) ? String(v) : String(+v.toPrecision(8)); }
+function str(n, parentPrec = 0) {
+  let s, pr;
+  switch (n.k) {
+    case "num": s = n.name ? n.name : fmtNum(n.v); pr = n.v < 0 ? 1 : 9; break;
+    case "var": s = "x"; pr = 9; break;
+    case "neg": s = "-" + str(n.a, 3); pr = 3; break;
+    case "add": s = str(n.a, 1) + " + " + str(n.b, 1); pr = 1; break;
+    case "sub": s = str(n.a, 1) + " - " + str(n.b, 2); pr = 1; break;
+    case "mul": s = str(n.a, 2) + "*" + str(n.b, 3); pr = 2; break;
+    case "div": s = str(n.a, 2) + "/" + str(n.b, 3); pr = 2; break;
+    case "pow": s = str(n.a, 5) + "^" + str(n.b, 5); pr = 4; break;
+    case "fn": s = n.f + "(" + str(n.a, 0) + ")"; pr = 9; break;
+  }
+  return pr < parentPrec ? "(" + s + ")" : s;
+}
+
+/* ---------- Newton-Raphson ---------- */
+function newton(f, df, x0, tol, maxIter) {
+  const rows = [];
+  let x = x0, converged = false, reason = "";
+  for (let i = 0; i <= maxIter; i++) {
+    const fx = f(x), dfx = df(x);
+    if (!isFinite(fx)) { reason = "f(x) is not defined at x = " + fmtNum(x) + "."; rows.push({i, x, fx, dfx, err:null}); break; }
+    if (dfx === 0 || !isFinite(dfx)) { reason = "f'(x) is zero or undefined at x = " + fmtNum(x) + ", so Newton's step cannot continue. Try another starting value."; rows.push({i, x, fx, dfx, err:null}); break; }
+    const xn = x - fx / dfx;
+    const err = Math.abs(xn - x);
+    rows.push({i, x, fx, dfx, err});
+    if (err < tol) { converged = true; x = xn; rows.push({i: i+1, x: xn, fx: f(xn), dfx: df(xn), err: null}); break; }
+    x = xn;
+    if (i === maxIter) reason = "Reached the maximum number of iterations without meeting the tolerance.";
+  }
+  return {rows, converged, root: x, reason};
+}
+
+/* ---------- UI ---------- */
+const $ = id => document.getElementById(id);
+const sci = v => v === null || v === undefined ? "—" : (!isFinite(v) ? String(v) : (Math.abs(v) !== 0 && (Math.abs(v) < 1e-6 || Math.abs(v) >= 1e9) ? v.toExponential(6) : v.toFixed(6)));
+
+function showError(msg) { const e = $("error"); e.textContent = msg; e.hidden = false; $("results").hidden = true; }
+
+function solve() {
+  $("error").hidden = true;
+  let tree;
+  const src = $("eq").value.trim();
+  try {
+    if (!src) throw new Error("Please type an equation.");
+    // allow "lhs = rhs" -> lhs - (rhs)
+    const parts = src.split("=");
+    if (parts.length > 2) throw new Error("Use at most one '=' sign.");
+    tree = parts.length === 2 ? {k:"sub", a: parse(parts[0]), b: parse(parts[1] || "0")} : parse(src);
+  } catch (e) { return showError("Equation error: " + e.message); }
+  if (!hasVar(tree)) return showError("The equation must contain x.");
+  const x0 = parseFloat($("x0").value), tol = parseFloat($("tol").value), maxIt = parseInt($("maxit").value, 10);
+  if (!isFinite(x0)) return showError("Enter a numeric starting value x0.");
+  if (!(tol > 0)) return showError("Tolerance must be a positive number.");
+  if (!(maxIt >= 1)) return showError("Max iterations must be at least 1.");
+
+  const t1 = d(tree), t2 = d(t1);
+  const f = x => ev(tree, x), df = x => ev(t1, x), ddf = x => ev(t2, x);
+  const res = newton(f, df, x0, tol, Math.min(maxIt, 500));
+
+  $("d1").textContent = str(t1);
+  $("d2").textContent = str(t2);
+
+  const fx0 = f(x0), dfx0 = df(x0), ddx0 = ddf(x0);
+  const c = Math.abs(fx0 * ddx0 / (dfx0 * dfx0));
+  if (isFinite(c)) {
+    $("conv").innerHTML = "Convergence condition at x<sub>0</sub> = " + fmtNum(x0) + ": |f·f″/(f′)²| = " + c.toFixed(5) +
+      (c < 1 ? " &lt; 1 &rarr; <span class='ok'>satisfied at this point</span>. This is the lecture's check at the starting value only. It does not guarantee convergence for the whole run, so check the table and graph." : " &ge; 1 &rarr; <span class='warn'>not satisfied at this point, so the method may not converge from this start.</span>");
+  } else $("conv").textContent = "Convergence condition cannot be evaluated at x0.";
+
+  const last = res.rows[res.rows.length - 1];
+  if (res.converged) {
+    $("rootLine").innerHTML = "Approximate root: x ≈ " + (+res.root.toFixed(6)) + "&nbsp;&nbsp;(f(x) = " + sci(last.fx) + ")";
+    $("status").innerHTML = "<span class='ok'>Converged</span> after " + (res.rows.length - 2 + 1) + " iteration(s), |x<sub>i+1</sub> − x<sub>i</sub>| &lt; " + tol + ".";
+  } else {
+    $("rootLine").textContent = "No root found.";
+    $("status").innerHTML = "<span class='warn'>" + (res.reason || "Did not converge.") + "</span>";
+  }
+
+  const tb = $("table").querySelector("tbody"); tb.innerHTML = "";
+  for (const r of res.rows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = "<td>" + r.i + "</td><td>" + sci(r.x) + "</td><td>" + sci(r.fx) + "</td><td>" + sci(r.dfx) + "</td><td>" + sci(r.err) + "</td>";
+    tb.appendChild(tr);
+  }
+  $("results").hidden = false;
+  draw(f, res, x0);
+}
+
+/* ---------- Plot ---------- */
+function draw(f, res, x0) {
+  const cv = $("plot"), ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
+  const k = Math.max(1, W / (cv.clientWidth || W));
+  ctx.clearRect(0, 0, W, H); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  const xs = res.rows.map(r => r.x).filter(isFinite);
+  xs.push(x0);
+  let lo = Math.min(...xs), hi = Math.max(...xs);
+  let span = hi - lo; if (span < 1e-9) span = 2;
+  const pad = Math.max(span * 0.6, 2);
+  const xmin = lo - pad, xmax = hi + pad;
+  const samples = 800, pts = [];
+  for (let k = 0; k <= samples; k++) { const x = xmin + (xmax - xmin) * k / samples; const y = f(x); pts.push([x, isFinite(y) ? y : NaN]); }
+  // y range: use iterates to keep the root region readable, clip wild values
+  const ys = pts.map(p => p[1]).filter(isFinite).sort((a, b) => a - b);
+  if (!ys.length) { ctx.fillStyle="#991b1b"; ctx.fillText("f(x) is not defined on this range.", 20, 30); return; }
+  let ymin = ys[Math.floor(ys.length * 0.03)], ymax = ys[Math.ceil(ys.length * 0.97) - 1];
+  ymin = Math.min(ymin, 0); ymax = Math.max(ymax, 0);
+  if (ymax - ymin < 1e-9) { ymin -= 1; ymax += 1; }
+  const ypad = (ymax - ymin) * 0.08; ymin -= ypad; ymax += ypad;
+  const L = Math.round(55 * Math.min(k, 2.2)), R = 15, T = 15, B = Math.round(30 * Math.min(k, 2.2));
+  const sx = x => L + (x - xmin) / (xmax - xmin) * (W - L - R);
+  const sy = y => H - B - (y - ymin) / (ymax - ymin) * (H - T - B);
+  // grid + ticks
+  ctx.font = Math.round(12 * k) + "px system-ui"; ctx.fillStyle = "#475569"; ctx.strokeStyle = "#e2e8f0"; ctx.lineWidth = 1;
+  const tick = (a, b) => { const raw = (b - a) / 8, m = Math.pow(10, Math.floor(Math.log10(raw))); const f = raw / m; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * m; };
+  const tx = tick(xmin, xmax), ty = tick(ymin, ymax);
+  for (let x = Math.ceil(xmin / tx) * tx; x <= xmax; x += tx) { ctx.beginPath(); ctx.moveTo(sx(x), T); ctx.lineTo(sx(x), H - B); ctx.stroke(); ctx.textAlign = "center"; ctx.fillText(+x.toPrecision(6), sx(x), H - 8); }
+  for (let y = Math.ceil(ymin / ty) * ty; y <= ymax; y += ty) { ctx.beginPath(); ctx.moveTo(L, sy(y)); ctx.lineTo(W - R, sy(y)); ctx.stroke(); ctx.textAlign = "right"; ctx.fillText(+y.toPrecision(6), L - 6, sy(y) + 4); }
+  // axes
+  ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 1.5;
+  if (ymin < 0 && ymax > 0) { ctx.beginPath(); ctx.moveTo(L, sy(0)); ctx.lineTo(W - R, sy(0)); ctx.stroke(); }
+  if (xmin < 0 && xmax > 0) { ctx.beginPath(); ctx.moveTo(sx(0), T); ctx.lineTo(sx(0), H - B); ctx.stroke(); }
+  // curve (break at undefined values and big jumps like tan asymptotes)
+  ctx.strokeStyle = "#2563eb"; ctx.lineWidth = 2.2; ctx.beginPath();
+  let pen = false, prev = null;
+  for (const [x, y] of pts) {
+    if (!isFinite(y) || y < ymin - (ymax - ymin) * 2 || y > ymax + (ymax - ymin) * 2 || (prev !== null && Math.abs(y - prev) > (ymax - ymin) * 1.5)) { pen = false; prev = isFinite(y) ? y : null; continue; }
+    if (!pen) { ctx.moveTo(sx(x), sy(y)); pen = true; } else ctx.lineTo(sx(x), sy(y));
+    prev = y;
+  }
+  ctx.stroke();
+  // iterates
+  ctx.fillStyle = "#f97316";
+  res.rows.forEach((r, idx) => {
+    if (!isFinite(r.x) || !isFinite(r.fx)) return;
+    if (r.fx < ymin || r.fx > ymax) return;
+    ctx.beginPath(); ctx.arc(sx(r.x), sy(r.fx), 4, 0, 7); ctx.fill();
+  });
+  if (res.converged) {
+    ctx.fillStyle = "#dc2626"; ctx.beginPath(); ctx.arc(sx(res.root), sy(0), 6, 0, 7); ctx.fill();
+    ctx.fillStyle = "#0f172a"; ctx.textAlign = "center"; ctx.fillText("root ≈ " + (+res.root.toFixed(5)), Math.min(Math.max(sx(res.root), 60), W - 60), sy(0) - 12);
+  }
+}
+
+$("solve").addEventListener("click", solve);
+if (location.hash === "#demo") solve();
+$("eq").addEventListener("keydown", e => { if (e.key === "Enter") solve(); });
+document.querySelectorAll(".examples a").forEach(a => a.addEventListener("click", e => {
+  e.preventDefault(); $("eq").value = a.dataset.eq; $("x0").value = a.dataset.x0; solve();
+}));
+if (typeof module !== "undefined") module.exports = {parse, d, ev, str, newton};
+
+</script>
+</body>
+</html>
